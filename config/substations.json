@@ -1,0 +1,24 @@
+{
+    "substation_alpha": {
+        "display_name": "Substation Alpha",
+        "description": "Example configuration; replace parameter names with the approved site data dictionary.",
+        "parameters": {
+            "channel_1": "Transformer temperature",
+            "channel_2": "Bus voltage",
+            "channel_3": "Load current",
+            "channel_4": "Oil pressure",
+            "channel_5": "Battery state"
+        }
+    },
+    "substation_beta": {
+        "display_name": "Substation Beta",
+        "description": "Example configuration; replace parameter names with the approved site data dictionary.",
+        "parameters": {
+            "channel_1": "Phase A voltage",
+            "channel_2": "Phase B voltage",
+            "channel_3": "Phase C voltage",
+            "channel_4": "Frequency",
+            "channel_5": "Power factor"
+        }
+    }
+}
