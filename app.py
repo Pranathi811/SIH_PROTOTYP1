@@ -51,13 +51,21 @@ def get_substations():
 frames = get_frames()
 models = get_models()
 substations = get_substations()
-errors = validate_dataset(frames)
+validation_result = validate_dataset(frames)
 test = frames["test"].copy()
 substation_id = st.sidebar.selectbox("Substation", list(substations), format_func=lambda key: substations[key]["display_name"])
 substation = substations[substation_id]
 model_name = st.sidebar.selectbox("Detection model", ["isolation_forest", "autoencoder"], format_func=lambda x: x.replace("_", " ").title())
 channel = st.sidebar.selectbox("Telemetry view", ["All channels", *CHANNELS])
 show = st.sidebar.radio("Records", ["All records", "Anomalies only", "Normal only"])
+
+st.sidebar.divider()
+st.sidebar.markdown("### 🔗 API & Documentation")
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    st.link_button("📡 API Docs", "http://localhost:8000/docs", use_container_width=True)
+with col2:
+    st.link_button("⚡ API Health", "http://localhost:8000/health", use_container_width=True)
 date_min, date_max = test.timestamp.min().date(), test.timestamp.max().date()
 dates = st.sidebar.date_input("Time window", (date_min, date_max), min_value=date_min, max_value=date_max)
 
@@ -74,8 +82,8 @@ if show == "Normal only": visible = visible[visible.predicted_label.eq(0)]
 st.markdown(f'<div class="eyebrow">{substation["display_name"].upper()} / ESA-ADB PROTOTYPE</div>', unsafe_allow_html=True)
 st.title(f'{substation["display_name"]} health, at a glance')
 st.markdown('<div class="note">Synthetic telemetry operations console · 1-minute cadence · results are prototype-only</div>', unsafe_allow_html=True)
-if errors:
-    st.error("Dataset validation failed: " + " | ".join(errors))
+if validation_result["errors"]:
+    st.error("Dataset validation failed: " + " | ".join(validation_result["errors"]))
 
 anomaly_count = int(test.predicted_label.sum())
 cards = [("Records monitored", f"{len(test):,}"), ("Flagged anomalies", f"{anomaly_count:,}"), ("Anomaly rate", f"{anomaly_count / len(test):.1%}"), ("Model F1", f"{models['metrics'][model_name]['f1_score']:.3f}")]

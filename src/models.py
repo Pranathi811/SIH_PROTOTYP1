@@ -177,6 +177,139 @@ def train_all_models(
     }
 
 
+def build_models(frames: Dict[str, Any]) -> Dict[str, Any]:
+    """Build and load anomaly detection models from dataset frames or pre-trained models."""
+    from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+    
+    # Prepare data
+    train_df = frames["train"]
+    test_df = frames["test"]
+    labels_df = frames["labels"]
+    
+    # Extract features and scale
+    X_train = train_df[CHANNELS].values
+    X_test = test_df[CHANNELS].values
+    
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Try to load pre-trained models, otherwise train with minimal resources
+    models_dir = Path("models")
+    if models_dir.exists() and (models_dir / "isolation_forest.pkl").exists():
+        print("Loading pre-trained models...")
+        iso_forest = joblib.load(models_dir / "isolation_forest.pkl")
+        autoencoder = joblib.load(models_dir / "autoencoder.pkl")
+    else:
+        print("Training models with minimal resources (this may take a moment)...")
+        # Train with reduced memory footprint
+        iso_forest = IsolationForest(
+            n_estimators=50,  # Reduced from 200
+            contamination=0.04,
+            max_samples=min(256, len(X_train_scaled)),  # Limit sample size
+            random_state=42,
+            n_jobs=1  # Single thread to reduce memory usage
+        )
+        iso_forest.fit(X_train_scaled)
+        
+        autoencoder = SatelliteAutoencoder(input_dim=X_train_scaled.shape[1], random_state=42)
+        autoencoder.fit(X_train_scaled, epochs=10, batch_size=32, verbose=False)  # Reduced epochs and batch size
+    
+    # Generate predictions and scores
+    # Isolation Forest predictions (1 = anomaly, -1 = normal)
+    iso_predictions_raw = iso_forest.predict(X_test_scaled)
+    iso_predictions = (iso_predictions_raw == -1).astype(int)  # Convert to 0=normal, 1=anomaly
+    iso_scores = -iso_forest.score_samples(X_test_scaled)  # Anomaly scores (higher = more anomalous)
+    
+    # Autoencoder predictions
+    ae_scores = autoencoder.get_reconstruction_errors(X_test_scaled)
+    ae_threshold = np.percentile(ae_scores, 96)  # Use 96th percentile as threshold
+    ae_predictions = (ae_scores > ae_threshold).astype(int)
+    
+    # Get true labels
+    true_labels = test_df.timestamp.map(labels_df.set_index("timestamp")["anomaly_type"]).notna().astype(int)
+    
+    # Calculate metrics
+    metrics = {}
+    for model_name, predictions in [("isolation_forest", iso_predictions), ("autoencoder", ae_predictions)]:
+        metrics[model_name] = {
+            "f1_score": f1_score(true_labels, predictions, zero_division=0),
+            "precision": precision_score(true_labels, predictions, zero_division=0),
+            "recall": recall_score(true_labels, predictions, zero_division=0),
+        }
+    
+    # Calculate thresholds based on test set scores
+    iso_threshold = np.percentile(iso_scores, 96)
+    ae_threshold_val = np.percentile(ae_scores, 96)
+    
+    # Flatten structure for API access
+    return {
+        "predictions": {
+            "isolation_forest": iso_predictions,
+            "autoencoder": ae_predictions
+        },
+        "scores": {
+            "isolation_forest": iso_scores,
+            "autoencoder": ae_scores
+        },
+        "metrics": metrics,
+        "scaler": scaler,
+        "isolation_forest": iso_forest,
+        "autoencoder": autoencoder,
+        "thresholds": {
+            "isolation_forest": iso_threshold,
+            "autoencoder": ae_threshold_val
+        },
+        "models": {"isolation_forest": iso_forest, "autoencoder": autoencoder}
+    }
+
+
+def channel_deviations(models: Dict[str, Any], values: list) -> list:
+    """Calculate channel deviations from expected ranges."""
+    import numpy as np
+    # Calculate z-scores for each channel based on standard deviation
+    deviations = []
+    for i, channel in enumerate(CHANNELS):
+        if i < len(values):
+            # Simple deviation calculation
+            value = values[i]
+            # Assume mean of 50 and std of 15 for scaling purposes
+            mean = 50.0
+            std = 15.0
+            z_score = (value - mean) / std if std > 0 else 0
+            deviation = {
+                "channel": channel,
+                "value": value,
+                "z_score": float(z_score),
+                "absolute_z_score": float(abs(z_score)),
+                "deviation": abs(z_score)
+            }
+            deviations.append(deviation)
+    return deviations
+
+
+def per_type_metrics(frames: Dict[str, Any], models: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate metrics per anomaly type."""
+    from sklearn.metrics import f1_score
+    
+    test_df = frames["test"]
+    labels_df = frames["labels"]
+    
+    true_labels = test_df.timestamp.map(labels_df.set_index("timestamp")["anomaly_type"])
+    anomaly_types = labels_df["anomaly_type"].unique()
+    
+    metrics = {}
+    for atype in anomaly_types:
+        mask = (true_labels == atype)
+        if mask.sum() > 0:
+            metrics[atype] = {
+                "count": int(mask.sum()),
+                "detected": int((models["predictions"]["isolation_forest"][mask] == 1).sum())
+            }
+    
+    return metrics
+
+
 def save_trained_models(
     models: Dict[str, Any],
     scaler: StandardScaler,

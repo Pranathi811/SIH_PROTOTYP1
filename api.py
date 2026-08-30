@@ -78,4 +78,21 @@ def anomaly_types():
 
 @app.get("/model-performance")
 def model_performance():
-    return {name: {key: value for key, value in metrics.items() if key != "confusion_matrix"} for name, metrics in models["metrics"].items()}
+    """Get ML model performance metrics (precision, recall, F1-score)."""
+    performance = {}
+    for model_name, metrics in models["metrics"].items():
+        performance[model_name] = {
+            "f1_score": round(float(metrics["f1_score"]), 4),
+            "precision": round(float(metrics["precision"]), 4),
+            "recall": round(float(metrics["recall"]), 4),
+            "description": {
+                "f1_score": "Overall model accuracy (0-1, higher is better)",
+                "precision": "Accuracy of positive predictions (fewer false alarms)",
+                "recall": "Percentage of actual anomalies detected (doesn't miss)"
+            }
+        }
+    return {
+        "models": performance,
+        "best_model": max(models["metrics"].items(), key=lambda x: x[1]["f1_score"])[0],
+        "summary": f"Isolation Forest F1: {models['metrics']['isolation_forest']['f1_score']:.2%} | Autoencoder F1: {models['metrics']['autoencoder']['f1_score']:.2%}"
+    }
